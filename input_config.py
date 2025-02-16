@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
 @dataclass
@@ -22,7 +22,7 @@ class ResearchSettings:
 @dataclass
 class ResearchInput:
     query_topic: str
-    settings: ResearchSettings = ResearchSettings()
+    settings: ResearchSettings = field(default_factory=ResearchSettings)
     
     def validate(self) -> bool:
         """Validate the research input parameters."""

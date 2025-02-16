@@ -54,16 +54,11 @@ class StepLearnings:
             "suggested_queries": self.suggested_queries
         }
 
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'StepLearnings':
-        return cls(**data)
-
 @dataclass
 class ResearchJob:
     """A single research job within a step"""
     query_config: QueryConfig
     exploration_results: WebExplorationResult
-    learnings: Dict[str, Any]
     search_gradings: SearchGrading
 
 @dataclass
@@ -99,24 +94,18 @@ class ResearchResults:
 @dataclass
 class ResearchSession:
     """Main container for all research-related data produced during a research run"""
-    
-    # Session metadata
     session_id: str
-    start_time: datetime
-    end_time: Optional[datetime] = None
-    
-    # Input configuration
     input_config: ResearchInput
-    research_settings: ResearchSettings = field(default_factory=lambda: ResearchSettings())
+    start_time: datetime = field(default_factory=datetime.now)
+    end_time: Optional[datetime] = None
+    research_settings: ResearchSettings = field(default_factory=ResearchSettings)
+    steps: List[StepData] = field(default_factory=list)
+    final_results: Optional[ResearchResults] = None
     
     def __post_init__(self):
         # Initialize research_settings from input_config if not provided
         if not self.research_settings:
             self.research_settings = self.input_config.settings
-    
-    # Research data
-    steps: List[StepData] = field(default_factory=list)
-    final_results: Optional[ResearchResults] = None
     
     def create_new_step(self) -> StepData:
         """Create a new research step"""
