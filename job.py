@@ -1,7 +1,7 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from enum import Enum
-from research_session import QueryConfig, WebExplorationResult, SearchGrading
+from research_session_configs import QueryConfig, WebExplorationResult, SearchGrading, ReaserchJobData
 from tools.web_search import BraveSearchClient, BraveSearchResult
 from tools.web_extract import WebExtractor
 
@@ -17,6 +17,7 @@ class Job:
     query_config: QueryConfig
     state: JobState = JobState.NONE
     exploration_results: Optional[WebExplorationResult] = None
+    learnings: Dict[str, Any] = field(default_factory=dict)
     search_gradings: Optional[SearchGrading] = None
     error_message: Optional[str] = None
     _search_client: Optional[BraveSearchClient] = None
@@ -103,6 +104,15 @@ class Job:
             self.error_message = str(e)
             self.state = JobState.FAILED
             return False
+    
+    def get_data(self) -> ReaserchJobData:
+        """Get the job data in ReaserchJobData format"""
+        return ReaserchJobData(
+            query_config=self.query_config,
+            exploration_results=self.exploration_results,
+            learnings=self.learnings,
+            search_gradings=self.search_gradings
+        )
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert job to dictionary format"""
