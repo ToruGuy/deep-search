@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 import os
 import sys
+from loguru import logger
 
 # Add the root directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -34,15 +35,18 @@ class Job:
     
     def initialize(self) -> bool:
         """Initialize the job"""
+        logger.info(f"Initializing job with query: {self.query_config.query}")
         try:
             if not self.query_config or not self.query_config.query:
                 self.error_message = "Invalid query configuration: missing query"
                 self.state = JobState.FAILED
+                logger.error(f"Job initialization failed: {self.error_message}")
                 return False
                 
             if not self.query_config.goals or len(self.query_config.goals) == 0:
                 self.error_message = "Invalid query configuration: no research goals provided"
                 self.state = JobState.FAILED
+                logger.error(f"Job initialization failed: {self.error_message}")
                 return False
             
             # Initialize search client and web extractor
@@ -50,26 +54,32 @@ class Job:
             self._web_extractor = WebExtractor()
             
             self.state = JobState.INITIALIZED
+            logger.debug("Job initialized successfully")
             return True
         except Exception as e:
             self.error_message = str(e)
             self.state = JobState.FAILED
+            logger.error(f"Job initialization failed: {self.error_message}")
             return False
     
     async def run(self) -> bool:
         """Run the job to get web exploration results"""
         if self.state != JobState.INITIALIZED:
             self.error_message = f"Cannot run job in state: {self.state}"
+            logger.error(f"Cannot run job: {self.error_message}")
             return False
             
+        logger.info("Starting job execution")
         try:
             self.state = JobState.RUNNING
             
             # Perform web search
+            logger.debug("Starting web search")
             search_results = await self._search_client.search(
                 query=self.query_config.query,
                 count=3  # Adjust based on your needs
             )
+            logger.info(f"Found {len(search_results)} search results")
             
             # Convert search results to SERP format
             serp_results = [
@@ -85,10 +95,12 @@ class Job:
             urls = [result.url for result in search_results]
             
             # Extract content using Firecrawl
+            logger.debug("Starting web extraction")
             extraction_results = self._web_extractor.extract_content(
                 urls=urls,
                 research_goals=self.query_config.goals
             )
+            logger.info("Web extraction completed")
             
             # Create exploration results
             self.exploration_results = WebExplorationResult(
@@ -97,25 +109,28 @@ class Job:
                 success_rating=0.8 if serp_results else 0.0
             )
             
-            # # Create search grading
-            # self.search_gradings = SearchGrading(
-            #     relevance_score=0.8 if serp_results else 0.0,
-            #     coverage_score=0.7 if serp_results else 0.0,
-            #     depth_score=0.6 if serp_results else 0.0,
-            #     source_quality=0.9 if serp_results else 0.0,
-            #     notes="Results from Brave Search API and Firecrawl extraction"
-            # )
+            # Create search grading
+            self.search_gradings = SearchGrading(
+                relevance_score=0.8 if serp_results else 0.0,
+                coverage_score=0.7 if serp_results else 0.0,
+                depth_score=0.6 if serp_results else 0.0,
+                source_quality=0.9 if serp_results else 0.0,
+                notes="Results from Brave Search API and Firecrawl extraction"
+            )
             
             self.state = JobState.COMPLETED
+            logger.info("Job completed successfully")
             return True
             
         except Exception as e:
             self.error_message = str(e)
             self.state = JobState.FAILED
+            logger.error(f"Job execution failed: {self.error_message}")
             return False
     
     def get_results(self) -> ReaserchJobData:
         """Get the job data in ReaserchJobData format"""
+        logger.debug("Retrieving job results")
         return ReaserchJobData(
             query_config=self.query_config,
             exploration_results=self.exploration_results,
@@ -125,11 +140,12 @@ class Job:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert job to dictionary format"""
+        logger.debug("Converting job to dictionary")
         return {
             "state": self.state.value,
             "error_message": self.error_message,
             "exploration_results": self.exploration_results.__dict__ if self.exploration_results else None,
-            # "search_gradings": self.search_gradings.__dict__ if self.search_gradings else None
+            "search_gradings": self.search_gradings.__dict__ if self.search_gradings else None
         }
 
 
@@ -137,6 +153,10 @@ if __name__ == "__main__":
     import asyncio
     from dotenv import load_dotenv
 
+    # Configure logger
+    logger.remove()  # Remove default handler
+    logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
+    
     def print_job_results(job: Job):
         """Print the results of a successful job."""
         print("\nJob completed successfully!")
