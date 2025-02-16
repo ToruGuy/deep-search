@@ -1,7 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 from datetime import datetime
-from input_config import ResearchInput, ResearchSettings
 
 @dataclass
 class QueryConfig:
@@ -96,17 +95,10 @@ class ResearchResults:
 class ResearchSession:
     """Main container for all research-related data produced during a research run"""
     session_id: str
-    input_config: ResearchInput
     start_time: datetime = field(default_factory=datetime.now)
     end_time: Optional[datetime] = None
-    research_settings: ResearchSettings = field(default_factory=ResearchSettings)
     steps: List[StepData] = field(default_factory=list)
     final_results: Optional[ResearchResults] = None
-    
-    def __post_init__(self):
-        # Initialize research_settings from input_config if not provided
-        if not self.research_settings:
-            self.research_settings = self.input_config.settings
     
     def create_new_step(self) -> StepData:
         """Create a new research step"""
@@ -145,8 +137,6 @@ class ResearchSession:
             "session_id": self.session_id,
             "start_time": self.start_time.isoformat(),
             "end_time": self.end_time.isoformat() if self.end_time else None,
-            "input_config": self.input_config.to_dict(),
-            "research_settings": self.research_settings.to_dict(),
             "steps": [
                 {
                     "step_number": step.step_number,
@@ -183,13 +173,9 @@ class ResearchSession:
     @classmethod
     def from_dict(cls, data: Dict) -> "ResearchSession":
         """Create a ResearchSession instance from a dictionary"""
-        input_config = ResearchInput.from_dict(data["input_config"])
-        research_settings = ResearchSettings(**data["research_settings"])
         session = cls(
             session_id=data["session_id"],
             start_time=datetime.fromisoformat(data["start_time"]),
-            input_config=input_config,
-            research_settings=research_settings
         )
         
         if data.get("end_time"):
