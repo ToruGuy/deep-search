@@ -1,69 +1,100 @@
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from datetime import datetime
 from input_config import ResearchInput, ResearchSettings
 
 @dataclass
 class QueryConfig:
-    """Configuration for a single query including its specific research goals"""
+    """Configuration for a specific research query"""
     query: str
     goals: List[str]
 
 @dataclass
 class WebExplorationResult:
-    """Results from exploring web content for a specific query"""
+    """Results from web exploration for a specific query"""
     serp_results: List[Dict]
-    web_extract: Dict
-    query_results: List[Dict]
-    success_rating: float  # 0-1 rating of how well this query achieved its goals
+    web_extract_results: str
+    success_rating: float
+
+@dataclass 
+class SearchGrading:
+    """Grading structure for search results"""
+    relevance_score: float
+    coverage_score: float
+    depth_score: float
+    source_quality: float
+    notes: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "relevance_score": self.relevance_score,
+            "coverage_score": self.coverage_score,
+            "depth_score": self.depth_score,
+            "source_quality": self.source_quality,
+            "notes": self.notes
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SearchGrading':
+        return cls(**data)
 
 @dataclass
-class QueryLearnings:
-    """Learnings and insights gained from a specific query"""
+class StepLearnings:
+    """Aggregated learnings and insights for a research step"""
     key_findings: List[str]
-    suggested_follow_up_queries: List[QueryConfig]
     areas_to_explore: List[str]
     confidence_score: float
+    suggested_queries: List[str]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "key_findings": self.key_findings,
+            "areas_to_explore": self.areas_to_explore,
+            "confidence_score": self.confidence_score,
+            "suggested_queries": self.suggested_queries
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'StepLearnings':
+        return cls(**data)
 
 @dataclass
 class ResearchJob:
-    """A single research job that explores one query path"""
+    """A single research job within a step"""
     query_config: QueryConfig
     exploration_results: WebExplorationResult
-    learnings: QueryLearnings
-    search_gradings: Dict
+    learnings: Dict[str, Any]
+    search_gradings: SearchGrading
 
 @dataclass
 class StepData:
-    """A research step that can contain multiple parallel research jobs"""
+    """Data for a single research step"""
     step_number: int
-    jobs: List[ResearchJob]
-    step_summary: Optional[str] = None  # Summary of findings across all jobs in this step
+    jobs: List[ResearchJob] = field(default_factory=list)
+    step_summary: Optional[str] = None
+    step_learnings: Optional[StepLearnings] = None
     
     def add_job(self, job: ResearchJob):
-        """Add a new research job to this step"""
+        """Add a job to this step"""
         self.jobs.append(job)
     
     def get_successful_jobs(self, min_success_rating: float = 0.7) -> List[ResearchJob]:
-        """Get jobs that were successful in achieving their goals"""
+        """Get jobs that meet the minimum success rating"""
         return [
             job for job in self.jobs 
             if job.exploration_results.success_rating >= min_success_rating
         ]
-    
-    def get_all_findings(self) -> List[str]:
-        """Get all key findings from all jobs in this step"""
-        findings = []
-        for job in self.jobs:
-            findings.extend(job.learnings.key_findings)
-        return findings
 
 @dataclass
 class ResearchResults:
-    """Final consolidated results from the entire research session"""
+    """Final results of the research session"""
     main_report: str
-    key_learnings: List[Dict]  # List of key insights with supporting evidence
-    additional_notes: List[str]
+    key_learnings: List[str]
+    visited_sources: List[Dict[str, Any]]  # List of sources with metadata like quality, relevance
+    areas_covered: List[str]  # Areas that were thoroughly researched
+    areas_to_explore: List[str]  # Areas identified for further research
+    best_sources: List[Dict[str, Any]]  # Top sources with high quality scores
+    additional_notes: Optional[str] = None
 
 @dataclass
 class ResearchSession:
@@ -130,6 +161,7 @@ class ResearchSession:
                 {
                     "step_number": step.step_number,
                     "step_summary": step.step_summary,
+                    "step_learnings": step.step_learnings.to_dict() if step.step_learnings else None,
                     "jobs": [
                         {
                             "query_config": {
@@ -138,22 +170,11 @@ class ResearchSession:
                             },
                             "exploration_results": {
                                 "serp_results": job.exploration_results.serp_results,
-                                "web_extract": job.exploration_results.web_extract,
-                                "query_results": job.exploration_results.query_results,
+                                "web_extract_results": job.exploration_results.web_extract_results,
                                 "success_rating": job.exploration_results.success_rating
                             },
-                            "learnings": {
-                                "key_findings": job.learnings.key_findings,
-                                "suggested_follow_up_queries": [
-                                    {
-                                        "query": q.query,
-                                        "goals": q.goals
-                                    } for q in job.learnings.suggested_follow_up_queries
-                                ],
-                                "areas_to_explore": job.learnings.areas_to_explore,
-                                "confidence_score": job.learnings.confidence_score
-                            },
-                            "search_gradings": job.search_gradings
+                            "learnings": job.learnings,
+                            "search_gradings": job.search_gradings.to_dict()
                         } for job in step.jobs
                     ]
                 } for step in self.steps
@@ -161,6 +182,10 @@ class ResearchSession:
             "final_results": {
                 "main_report": self.final_results.main_report,
                 "key_learnings": self.final_results.key_learnings,
+                "visited_sources": self.final_results.visited_sources,
+                "areas_covered": self.final_results.areas_covered,
+                "areas_to_explore": self.final_results.areas_to_explore,
+                "best_sources": self.final_results.best_sources,
                 "additional_notes": self.final_results.additional_notes
             } if self.final_results else None
         }
@@ -184,7 +209,8 @@ class ResearchSession:
             step = StepData(
                 step_number=step_data["step_number"],
                 jobs=[],
-                step_summary=step_data.get("step_summary")
+                step_summary=step_data.get("step_summary"),
+                step_learnings=StepLearnings.from_dict(step_data["step_learnings"]) if step_data.get("step_learnings") else None
             )
             
             for job_data in step_data["jobs"]:
@@ -195,22 +221,11 @@ class ResearchSession:
                     ),
                     exploration_results=WebExplorationResult(
                         serp_results=job_data["exploration_results"]["serp_results"],
-                        web_extract=job_data["exploration_results"]["web_extract"],
-                        query_results=job_data["exploration_results"]["query_results"],
+                        web_extract_results=job_data["exploration_results"]["web_extract_results"],
                         success_rating=job_data["exploration_results"]["success_rating"]
                     ),
-                    learnings=QueryLearnings(
-                        key_findings=job_data["learnings"]["key_findings"],
-                        suggested_follow_up_queries=[
-                            QueryConfig(
-                                query=q["query"],
-                                goals=q["goals"]
-                            ) for q in job_data["learnings"]["suggested_follow_up_queries"]
-                        ],
-                        areas_to_explore=job_data["learnings"]["areas_to_explore"],
-                        confidence_score=job_data["learnings"]["confidence_score"]
-                    ),
-                    search_gradings=job_data["search_gradings"]
+                    learnings=job_data["learnings"],
+                    search_gradings=SearchGrading.from_dict(job_data["search_gradings"])
                 )
                 step.add_job(job)
             
@@ -220,6 +235,10 @@ class ResearchSession:
             session.final_results = ResearchResults(
                 main_report=data["final_results"]["main_report"],
                 key_learnings=data["final_results"]["key_learnings"],
+                visited_sources=data["final_results"]["visited_sources"],
+                areas_covered=data["final_results"]["areas_covered"],
+                areas_to_explore=data["final_results"]["areas_to_explore"],
+                best_sources=data["final_results"]["best_sources"],
                 additional_notes=data["final_results"]["additional_notes"]
             )
         
