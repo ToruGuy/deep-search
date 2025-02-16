@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 from research_session import QueryConfig, WebExplorationResult, SearchGrading
 from tools.web_search import BraveSearchClient, BraveSearchResult
+from tools.web_extract import WebExtractor
 
 class JobState(Enum):
     NONE = "none"
@@ -19,6 +20,7 @@ class Job:
     search_gradings: Optional[SearchGrading] = None
     error_message: Optional[str] = None
     _search_client: Optional[BraveSearchClient] = None
+    _web_extractor: Optional[WebExtractor] = None
     
     def initialize(self) -> bool:
         """Initialize the job"""
@@ -33,8 +35,9 @@ class Job:
                 self.state = JobState.FAILED
                 return False
             
-            # Initialize search client
+            # Initialize search client and web extractor
             self._search_client = BraveSearchClient()
+            self._web_extractor = WebExtractor()
             
             self.state = JobState.INITIALIZED
             return True
@@ -55,7 +58,7 @@ class Job:
             # Perform web search
             search_results = await self._search_client.search(
                 query=self.query_config.query,
-                count=10  # Adjust based on your needs
+                count=3  # Adjust based on your needs
             )
             
             # Convert search results to SERP format
@@ -68,26 +71,30 @@ class Job:
                 for result in search_results
             ]
             
-            # For now, we'll use a simple concatenation of descriptions as web extract
-            # In a real implementation, you'd want to actually fetch and process the content
-            web_extract = "\n\n".join(result.description for result in search_results)
+            # Extract URLs for content extraction
+            urls = [result.url for result in search_results]
+            
+            # Extract content using Firecrawl
+            extraction_results = self._web_extractor.extract_content(
+                urls=urls,
+                research_goals=self.query_config.goals
+            )
             
             # Create exploration results
             self.exploration_results = WebExplorationResult(
                 serp_results=serp_results,
-                web_extract_results=web_extract,
+                web_extract_results=extraction_results,
                 success_rating=0.8 if serp_results else 0.0
             )
             
-            # Create basic search grading
-            # In a real implementation, you'd want to actually evaluate the results
-            self.search_gradings = SearchGrading(
-                relevance_score=0.8 if serp_results else 0.0,
-                coverage_score=0.7 if serp_results else 0.0,
-                depth_score=0.6 if serp_results else 0.0,
-                source_quality=0.9 if serp_results else 0.0,
-                notes="Results from Brave Search API"
-            )
+            # # Create search grading
+            # self.search_gradings = SearchGrading(
+            #     relevance_score=0.8 if serp_results else 0.0,
+            #     coverage_score=0.7 if serp_results else 0.0,
+            #     depth_score=0.6 if serp_results else 0.0,
+            #     source_quality=0.9 if serp_results else 0.0,
+            #     notes="Results from Brave Search API and Firecrawl extraction"
+            # )
             
             self.state = JobState.COMPLETED
             return True
@@ -100,11 +107,10 @@ class Job:
     def to_dict(self) -> Dict[str, Any]:
         """Convert job to dictionary format"""
         return {
-            "query_config": self.query_config.__dict__,
             "state": self.state.value,
+            "error_message": self.error_message,
             "exploration_results": self.exploration_results.__dict__ if self.exploration_results else None,
-            "search_gradings": self.search_gradings.to_dict() if self.search_gradings else None,
-            "error_message": self.error_message
+            # "search_gradings": self.search_gradings.__dict__ if self.search_gradings else None
         }
 
 
@@ -118,38 +124,44 @@ if __name__ == "__main__":
         
         # Create test query config
         query_config = QueryConfig(
-            query="What are the latest developments in quantum computing?",
-            goals=["Understand recent breakthroughs", "Learn about quantum supremacy"]
+            query="Fastest production car",
+            goals=[
+                "What's the fastest production car make and model?",
+                "What's the top speed?",
+                "How much it costs?"
+            ]
         )
         
-        # Create and test job
+        # Create and run job
         job = Job(query_config=query_config)
         
-        # Test initialization
-        print("Testing job initialization...")
-        init_success = job.initialize()
-        print(f"Initialization {'successful' if init_success else 'failed'}")
-        print(f"Job state: {job.state}")
-        print(f"Error message: {job.error_message}")
-        
-        if init_success:
-            # Test running the job
-            print("\nTesting job execution...")
-            run_success = await job.run()
-            print(f"Execution {'successful' if run_success else 'failed'}")
-            print(f"Job state: {job.state}")
-            print(f"Error message: {job.error_message}")
-            
-            if run_success:
-                # Print results
-                print("\nJob Results:")
-                print(f"SERP Results: {len(job.exploration_results.serp_results)} items")
-                print("\nFirst result:")
-                print(f"Title: {job.exploration_results.serp_results[0]['title']}")
-                print(f"URL: {job.exploration_results.serp_results[0]['url']}")
-                print(f"Description: {job.exploration_results.serp_results[0]['description'][:200]}...")
-                print(f"\nSuccess Rating: {job.exploration_results.success_rating}")
-                print(f"Search Grading: {job.search_gradings.to_dict()}")
+        print("Initializing job...")
+        if job.initialize():
+            print("Running job...")
+            if await job.run():
+                print("\nJob completed successfully!")
+                print("\nExploration Results:")
+                if job.exploration_results:
+                    print("\nSERP Results:")
+                    for result in job.exploration_results.serp_results:
+                        print(f"- {result['title']}: {result['url']}")
+                    
+                    print("\nExtracted Answers:")
+                    for i, goal in enumerate(query_config.goals, 1):
+                        print(f"\nGoal: {goal}")
+                        print(f"Answer: {job.exploration_results.web_extract_results[f'goal{i}']}")
+                    
+                    if job.search_gradings:
+                        print("\nSearch Grading:")
+                        print(f"Relevance: {job.search_gradings.relevance_score}")
+                        print(f"Coverage: {job.search_gradings.coverage_score}")
+                        print(f"Depth: {job.search_gradings.depth_score}")
+                        print(f"Source Quality: {job.search_gradings.source_quality}")
+                        print(f"Notes: {job.search_gradings.notes}")
+            else:
+                print(f"Job failed: {job.error_message}")
+        else:
+            print(f"Job initialization failed: {job.error_message}")
     
     # Run the test
     asyncio.run(test_job())
