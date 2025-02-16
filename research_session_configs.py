@@ -55,25 +55,26 @@ class StepLearnings:
         }
 
 @dataclass
-class ResearchJob:
+class ReaserchJobData:
     """A single research job within a step"""
     query_config: QueryConfig
     exploration_results: WebExplorationResult
+    learnings: Dict[str, Any]
     search_gradings: SearchGrading
 
 @dataclass
 class StepData:
     """Data for a single research step"""
     step_number: int
-    jobs: List[ResearchJob] = field(default_factory=list)
+    jobs: List[ReaserchJobData] = field(default_factory=list)
     step_summary: Optional[str] = None
     step_learnings: Optional[StepLearnings] = None
     
-    def add_job(self, job: ResearchJob):
+    def add_job(self, job: ReaserchJobData):
         """Add a job to this step"""
         self.jobs.append(job)
     
-    def get_successful_jobs(self, min_success_rating: float = 0.7) -> List[ResearchJob]:
+    def get_successful_jobs(self, min_success_rating: float = 0.7) -> List[ReaserchJobData]:
         """Get jobs that meet the minimum success rating"""
         return [
             job for job in self.jobs 
@@ -113,7 +114,7 @@ class ResearchSession:
         self.steps.append(step)
         return step
     
-    def add_job_to_step(self, step_number: int, job: ResearchJob):
+    def add_job_to_step(self, step_number: int, job: ReaserchJobData):
         """Add a research job to a specific step"""
         if step_number >= len(self.steps):
             raise ValueError(f"Step {step_number} does not exist")
@@ -124,7 +125,7 @@ class ResearchSession:
         self.final_results = results
         self.end_time = datetime.now()
     
-    def get_all_successful_jobs(self, min_success_rating: float = 0.7) -> List[ResearchJob]:
+    def get_all_successful_jobs(self, min_success_rating: float = 0.7) -> List[ReaserchJobData]:
         """Get all successful jobs across all steps"""
         successful_jobs = []
         for step in self.steps:
@@ -203,7 +204,7 @@ class ResearchSession:
             )
             
             for job_data in step_data["jobs"]:
-                job = ResearchJob(
+                job = ReaserchJobData(
                     query_config=QueryConfig(
                         query=job_data["query_config"]["query"],
                         goals=job_data["query_config"]["goals"]
