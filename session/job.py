@@ -3,6 +3,8 @@ from typing import List, Optional, Dict, Any
 from enum import Enum
 import os
 import sys
+import uuid
+from datetime import datetime
 from loguru import logger
 
 # Add the root directory to Python path
@@ -25,6 +27,7 @@ class JobState(Enum):
 @dataclass
 class Job:
     query_config: QueryConfig
+    job_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     state: JobState = JobState.NONE
     exploration_results: Optional[WebExplorationResult] = None
     learnings: Dict[str, Any] = field(default_factory=dict)
@@ -35,18 +38,18 @@ class Job:
     
     def initialize(self) -> bool:
         """Initialize the job"""
-        logger.info(f"Initializing job with query: {self.query_config.query}")
+        logger.info(f"Initializing job {self.job_id} with query: {self.query_config.query}")
         try:
             if not self.query_config or not self.query_config.query:
                 self.error_message = "Invalid query configuration: missing query"
                 self.state = JobState.FAILED
-                logger.error(f"Job initialization failed: {self.error_message}")
+                logger.error(f"Job {self.job_id} initialization failed: {self.error_message}")
                 return False
                 
             if not self.query_config.goals or len(self.query_config.goals) == 0:
                 self.error_message = "Invalid query configuration: no research goals provided"
                 self.state = JobState.FAILED
-                logger.error(f"Job initialization failed: {self.error_message}")
+                logger.error(f"Job {self.job_id} initialization failed: {self.error_message}")
                 return False
             
             # Initialize search client and web extractor
@@ -54,32 +57,32 @@ class Job:
             self._web_extractor = WebExtractor()
             
             self.state = JobState.INITIALIZED
-            logger.debug("Job initialized successfully")
+            logger.debug(f"Job {self.job_id} initialized successfully")
             return True
         except Exception as e:
             self.error_message = str(e)
             self.state = JobState.FAILED
-            logger.error(f"Job initialization failed: {self.error_message}")
+            logger.error(f"Job {self.job_id} initialization failed: {self.error_message}")
             return False
     
     async def run(self) -> bool:
         """Run the job to get web exploration results"""
         if self.state != JobState.INITIALIZED:
             self.error_message = f"Cannot run job in state: {self.state}"
-            logger.error(f"Cannot run job: {self.error_message}")
+            logger.error(f"Cannot run job {self.job_id}: {self.error_message}")
             return False
             
-        logger.info("Starting job execution")
+        logger.info(f"Starting job {self.job_id} execution")
         try:
             self.state = JobState.RUNNING
             
             # Perform web search
-            logger.debug("Starting web search")
+            logger.debug(f"Starting web search for job {self.job_id}")
             search_results = await self._search_client.search(
                 query=self.query_config.query,
                 count=3  # Adjust based on your needs
             )
-            logger.info(f"Found {len(search_results)} search results")
+            logger.info(f"Found {len(search_results)} search results for job {self.job_id}")
             
             # Convert search results to SERP format
             serp_results = [
@@ -95,12 +98,12 @@ class Job:
             urls = [result.url for result in search_results]
             
             # Extract content using Firecrawl
-            logger.debug("Starting web extraction")
+            logger.debug(f"Starting web extraction for job {self.job_id}")
             extraction_results = self._web_extractor.extract_content(
                 urls=urls,
                 research_goals=self.query_config.goals
             )
-            logger.info("Web extraction completed")
+            logger.info(f"Web extraction completed for job {self.job_id}")
             
             # Create exploration results
             self.exploration_results = WebExplorationResult(
@@ -119,18 +122,18 @@ class Job:
             )
             
             self.state = JobState.COMPLETED
-            logger.info("Job completed successfully")
+            logger.info(f"Job {self.job_id} completed successfully")
             return True
             
         except Exception as e:
             self.error_message = str(e)
             self.state = JobState.FAILED
-            logger.error(f"Job execution failed: {self.error_message}")
+            logger.error(f"Job {self.job_id} execution failed: {self.error_message}")
             return False
     
     def get_results(self) -> ReaserchJobData:
         """Get the job data in ReaserchJobData format"""
-        logger.debug("Retrieving job results")
+        logger.debug(f"Retrieving results for job {self.job_id}")
         return ReaserchJobData(
             query_config=self.query_config,
             exploration_results=self.exploration_results,
@@ -140,7 +143,7 @@ class Job:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert job to dictionary format"""
-        logger.debug("Converting job to dictionary")
+        logger.debug(f"Converting job {self.job_id} to dictionary")
         return {
             "state": self.state.value,
             "error_message": self.error_message,
