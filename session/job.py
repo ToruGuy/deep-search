@@ -212,11 +212,17 @@ class Job:
                 self.error_message = "Failed to extract content from search results"
                 self.state = JobState.FAILED
                 return False
+
+            # Gather all answers into one string
+            learnings = f"Query: {self.query_config.query}\n" + "\n".join([
+                f"Goal {i+1}: {answer}"
+                for i, answer in enumerate(extraction_result.answers.values())
+            ])
                 
             logger.info(f"Web extraction completed for job {self.job_id}")
             
             # Store extraction result
-            self.job_data.extraction_result = extraction_result
+            self.job_data.learnings = learnings
             
             self.state = JobState.COMPLETED
             logger.info(f"Job {self.job_id} completed successfully")
@@ -278,14 +284,8 @@ def print_job_results(job: Job):
                 print(f"  - {snippet}")
     
     print("\nExtracted Content:")
-    if results.extraction_result:
-        for goal, answer in results.extraction_result.answers.items():
-            print(f"\n{goal}:")
-            print(answer)
-        
-        print("\nSources:")
-        for source in results.extraction_result.sources:
-            print(f"- {source}")
+    if results.learnings:
+        print(results.learnings)
 
 
 async def test_job():
