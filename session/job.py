@@ -330,6 +330,15 @@ async def test_job():
         # Load environment variables for API keys
         load_dotenv()
         
+        # Get API keys
+        brave_api_key = os.getenv('BRAVE_API_KEY')
+        firecrawl_api_key = os.getenv('FIRECRAWL_API_KEY')
+        
+        if not brave_api_key:
+            raise ValueError("BRAVE_API_KEY must be set in environment")
+        if not firecrawl_api_key:
+            raise ValueError("FIRECRAWL_API_KEY must be set in environment")
+        
         # Create test settings
         settings = ResearchSettings(
             max_results=3,
@@ -341,9 +350,9 @@ async def test_job():
             search_timeout=30
         )
         
-        # Initialize required dependencies
-        search_client = BraveSearchClient()
-        web_extractor = WebExtractor()
+        # Initialize required dependencies with API keys
+        search_client = BraveSearchClient(api_key=brave_api_key)
+        web_extractor = WebExtractor(api_key=firecrawl_api_key)
         
         # Create a test query config
         query_config = QueryConfig(
