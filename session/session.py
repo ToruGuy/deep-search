@@ -61,29 +61,51 @@ class Session:
                 api_key=self.research_input.settings.openai_api_key,
                 breath=self.research_input.settings.max_depth
             )
+            all_learnings = []
+            step_number = 1
             
-            # Initialize first research step
-            research_step = ResearchStep(step_number=1)
-            if not research_step.initialize():
-                raise Exception("Failed to initialize research step")
+            while step_number <= self.research_input.settings.max_depth:
+                logger.info(f"Starting research step {step_number}")
                 
-            # Generate queries for the first step
-            queries = researcher.create_queries(
-                self.research_input.query_topic
-            )
-            logger.info("Step 1 queries: {}", queries)
+                # Initialize research step
+                research_step = ResearchStep(step_number=step_number)
+                if not research_step.initialize():
+                    raise Exception("Failed to initialize research step")
+                    
+                # Generate queries for this step
+                queries = researcher.create_queries(
+                    self.research_input.query_topic,
+                    all_learnings
+                )
+                logger.info("Step {} queries: {}", step_number, queries)
+                
+                # Add queries as jobs to the research step
+                for query in queries:
+                    research_step.add_job(query)
+                    
+                # Run the research step
+                if not await research_step.run():
+                    raise Exception("Research step failed")
+                    
+                # Get results
+                step_data = research_step.get_results()
+                # logger.debug("Step {} data: {}", step_number, step_data)
+                
+                # Add learnings to all_learnings if available
+                if step_data.step_learnings and step_data.step_learnings.key_findings:
+                    all_learnings.append(step_data.step_learnings)
+                    logger.info("Step {} learnings:", step_number)
+                    for finding in step_data.step_learnings.key_findings:
+                        logger.info("  {}", finding)
+                
+                step_number += 1
             
-            # Add queries as jobs to the research step
-            for query in queries:
-                research_step.add_job(query)
-                
-            # Run the research step
-            if not await research_step.run():
-                raise Exception("Research step failed")
-                
-            # Get results
-            step_data = research_step.get_results()
-            logger.debug("Step data: {}", step_data)
+            # Generate final report
+            logger.info("Generating final research report")
+            final_report = researcher.write_report([
+                learning.key_findings for learning in all_learnings
+            ])
+            logger.info("Final Report:\n{}", final_report)
             
             self.state = SessionState.COMPLETED
             return True
@@ -112,9 +134,9 @@ if __name__ == "__main__":
     
     # Create example research input with settings including OpenAI key
     research_input = ResearchInput(
-        query_topic="Latest developments in artificial intelligence and their societal impact",
+        query_topic="What are the key advancements in cybersecurity AI for threat detection in 2024, and how do they compare in terms of efficiency, false positive rates, and real-world adoption?",
         settings=ResearchSettings(
-            max_depth=1,
+            max_depth=4,
             search_timeout=300,
             max_results=50,
             include_academic_sources=True,
