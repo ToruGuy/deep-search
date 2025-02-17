@@ -1,18 +1,136 @@
 from dataclasses import dataclass
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import requests
 import time
 import os
 import sys
+from enum import Enum
 from dotenv import load_dotenv
 from loguru import logger
 
+class Freshness(str, Enum):
+    PAST_DAY = "pd"
+    PAST_WEEK = "pw"
+    PAST_MONTH = "pm"
+    PAST_YEAR = "py"
+    ANY = None
+
+class SafeSearch(str, Enum):
+    OFF = "off"
+    MODERATE = "moderate"
+    STRICT = "strict"
+
+class ResultType(str, Enum):
+    DISCUSSIONS = "discussions"
+    FAQ = "faq"
+    INFOBOX = "infobox"
+    NEWS = "news"
+    QUERY = "query"
+    SUMMARIZER = "summarizer"
+    VIDEOS = "videos"
+    WEB = "web"
+    LOCATIONS = "locations"
+
+class Units(str, Enum):
+    METRIC = "metric"
+    IMPERIAL = "imperial"
+
+@dataclass
+class SearchOptions:
+    """Configuration for Brave Search API"""
+    # Required
+    query: str
+    
+    # Optional parameters with defaults
+    count: int = 20
+    offset: int = 0
+    country: str = "US"
+    search_lang: str = "en"
+    ui_lang: str = "en-US"
+    safesearch: SafeSearch = SafeSearch.OFF
+    freshness: Optional[Freshness] = None
+    text_decorations: bool = True
+    spellcheck: bool = True
+    result_filter: Optional[List[ResultType]] = None
+    goggles: Optional[str] = None
+    units: Optional[Units] = None
+    extra_snippets: bool = True
+    summary: bool = True
+
+    def to_api_params(self) -> Dict[str, Any]:
+        """Convert options to API parameters"""
+        params = {
+            'q': self.query,
+            'count': min(self.count, 20),  # API max limit is 20
+            'offset': min(self.offset, 9),  # API max limit is 9
+            'country': self.country,
+            'search_lang': self.search_lang,
+            'ui_lang': self.ui_lang,
+            'safesearch': self.safesearch,
+            'text_decorations': self.text_decorations,
+            'spellcheck': self.spellcheck,
+            'extra_snippets': self.extra_snippets,
+            'summary': self.summary
+        }
+        
+        # Add optional parameters only if they are set
+        if self.freshness:
+            params['freshness'] = self.freshness
+        if self.result_filter:
+            params['result_filter'] = ','.join([rf.value for rf in self.result_filter])
+        if self.goggles:
+            params['goggles'] = self.goggles
+        if self.units:
+            params['units'] = self.units
+            
+        return params
+
 @dataclass
 class BraveSearchResult:
+    """Represents a single search result from any result type"""
     title: str
     url: str
     description: str
+    result_type: ResultType
     page_age: Optional[str] = None
+    extra_snippets: Optional[List[str]] = None
+    source_type: Optional[str] = None
+    summary: Optional[str] = None
+    meta: Optional[Dict[str, Any]] = None  # Store additional type-specific data
+
+class BraveSearchResponse:
+    """Represents the complete search response"""
+    def __init__(self, data: Dict[str, Any]):
+        self.query: Dict[str, Any] = data.get('query', {})
+        self.results: List[BraveSearchResult] = []
+        self._parse_results(data)
+        
+    def _parse_results(self, data: Dict[str, Any]) -> None:
+        """Parse different types of results from the response"""
+        result_types = {
+            'web': ResultType.WEB,
+            'news': ResultType.NEWS,
+            'discussions': ResultType.DISCUSSIONS,
+            'videos': ResultType.VIDEOS,
+            'faq': ResultType.FAQ,
+            'locations': ResultType.LOCATIONS
+        }
+        
+        for result_key, result_type in result_types.items():
+            if result_key in data:
+                results = data[result_key].get('results', [])
+                for result in results:
+                    self.results.append(BraveSearchResult(
+                        title=result['title'],
+                        url=result['url'],
+                        description=result.get('description', ''),
+                        result_type=result_type,
+                        page_age=result.get('page_age'),
+                        extra_snippets=result.get('extra_snippets'),
+                        source_type=result.get('source_type') or result.get('type'),
+                        summary=result.get('summary'),
+                        meta=result  # Store full result data for type-specific processing
+                    ))
 
 class BraveSearchClient:
     """Client for interacting with Brave Search API"""
@@ -45,21 +163,23 @@ class BraveSearchClient:
             
         self.last_request_time = time.time()
         
-    async def search(self, query: str, count: int = 20) -> List[BraveSearchResult]:
+    async def search(
+        self, 
+        options: SearchOptions
+    ) -> BraveSearchResponse:
         """
         Perform a web search using Brave Search API
         
         Args:
-            query: Search query string
-            count: Number of results to return (max 20)
+            options: SearchOptions for customizing the search
             
         Returns:
-            List of BraveSearchResult objects
+            BraveSearchResponse object
             
         Raises:
             requests.RequestException: If the API request fails
         """
-        logger.info(f"Performing search for query: {query}")
+        logger.info(f"Performing search for query: {options.query}")
         
         try:
             await self._wait_for_rate_limit()
@@ -70,12 +190,9 @@ class BraveSearchClient:
                 'X-Subscription-Token': self.api_key
             }
             
-            params = {
-                'q': query,
-                'count': min(count, 20)  # Brave API max limit is 20
-            }
+            params = options.to_api_params()
             
-            logger.debug(f"Making API request to Brave Search with count={count}")
+            logger.debug(f"Making API request to Brave Search with params: {params}")
             response = requests.get(
                 self.base_url,
                 headers=headers,
@@ -86,66 +203,128 @@ class BraveSearchClient:
             data = response.json()
             logger.debug("Successfully received response from Brave Search API")
             
-            return [
-                BraveSearchResult(
-                    title=result['title'],
-                    url=result['url'],
-                    description=result['description'],
-                    page_age=result.get('page_age')
-                )
-                for result in data['web']['results']
-            ]
+            return BraveSearchResponse(data)
             
         except requests.exceptions.RequestException as e:
             logger.error(f"Failed to perform search: {str(e)}")
             if e.response is not None and e.response.status_code == 429:
-                logger.warning('Rate limit exceeded, retrying after delay...')
-                await self._delay(2)  # Wait 2 seconds on rate limit
-                return await self.search(query, count)  # Retry the request
-                
+                logger.warning("Rate limit exceeded, waiting before retry")
+                await self._delay(5)  # Wait 5 seconds before retry
+                return await self.search(options)
             raise
-        except Exception as e:
-            logger.error(f"Unexpected error during search: {str(e)}")
-            raise
+
+
+def print_result(result: BraveSearchResult):
+    """Print all available information for a search result"""
+    print("\n" + "="*80)
+    print(f"Title: {result.title}")
+    print(f"URL: {result.url}")
+    print(f"Type: {result.result_type.value}")
+    print(f"Description: {result.description}")
+    
+    if result.page_age:
+        print(f"Page Age: {result.page_age}")
+    if result.source_type:
+        print(f"Source Type: {result.source_type}")
+    if result.summary:
+        print(f"Summary: {result.summary}")
+    if result.extra_snippets:
+        print("\nExtra Snippets:")
+        for snippet in result.extra_snippets:
+            print(f"  - {snippet}")
+    if result.meta:
+        print("\nAdditional Metadata:")
+        for key, value in result.meta.items():
+            if key not in ['title', 'url', 'description', 'page_age', 'source_type', 'summary', 'extra_snippets']:
+                print(f"  {key}: {value}")
+
+
+async def test_search():
+    """Test the BraveSearchClient with various configurations"""
+    # Load environment variables
+    load_dotenv()
+    
+    client = BraveSearchClient()
+    
+    # Test basic web search
+    print("\nBASIC WEB SEARCH")
+    print("="*80)
+    options = SearchOptions(
+        query="Python programming best practices",
+        result_filter=[ResultType.WEB],
+        count=3,
+        extra_snippets=True,
+        summary=True
+    )
+    response = await client.search(options)
+    print(f"Query Info:")
+    print(f"  Original Query: {response.query.get('original_query', 'N/A')}")
+    print(f"  Altered Query: {response.query.get('altered_query', 'N/A')}")
+    print(f"\nFound {len(response.results)} results:")
+    for result in response.results:
+        print_result(result)
+    
+    # Test news search with advanced options
+    print("\n\nNEWS SEARCH WITH ADVANCED OPTIONS")
+    print("="*80)
+    options = SearchOptions(
+        query="AI developments",
+        count=3,
+        freshness=Freshness.PAST_MONTH,
+        result_filter=[ResultType.NEWS],
+        safesearch=SafeSearch.MODERATE,
+        units=Units.METRIC,
+        extra_snippets=True,
+        summary=True
+    )
+    response = await client.search(options)
+    print(f"Query Info:")
+    print(f"  Original Query: {response.query.get('original_query', 'N/A')}")
+    print(f"  Altered Query: {response.query.get('altered_query', 'N/A')}")
+    print(f"\nFound {len(response.results)} results:")
+    for result in response.results:
+        print_result(result)
+
+    # Test mixed search with multiple result types
+    print("\n\nMIXED SEARCH")
+    print("="*80)
+    options = SearchOptions(
+        query="Climate change solutions 2024",
+        count=5,
+        result_filter=[ResultType.WEB, ResultType.NEWS, ResultType.DISCUSSIONS],
+        freshness=Freshness.PAST_YEAR,
+        extra_snippets=True,
+        summary=True
+    )
+    response = await client.search(options)
+    print(f"Query Info:")
+    print(f"  Original Query: {response.query.get('original_query', 'N/A')}")
+    print(f"  Altered Query: {response.query.get('altered_query', 'N/A')}")
+    
+    # Group and count results by type
+    result_types = {}
+    for result in response.results:
+        type_name = result.result_type.value
+        if type_name not in result_types:
+            result_types[type_name] = 0
+        result_types[type_name] += 1
+    
+    print("\nResults by type:")
+    for type_name, count in result_types.items():
+        print(f"- {type_name}: {count} results")
+        
+    print(f"\nDetailed results ({len(response.results)} total):")
+    for result in response.results:
+        print_result(result)
 
 
 if __name__ == "__main__":
     import asyncio
     from pprint import pprint
     
-    # Configure logger
+    # Configure logging
     logger.remove()  # Remove default handler
     logger.add(sys.stderr, format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>")
     
-    async def test_search():
-        # Load environment variables
-        load_dotenv()
-        
-        # Create client
-        client = BraveSearchClient()
-        
-        # Test basic search
-        print("\nTesting basic search...")
-        results = await client.search("What is artificial intelligence?", count=5)
-        print(f"Got {len(results)} results:")
-        for i, result in enumerate(results, 1):
-            print(f"\nResult {i}:")
-            pprint(vars(result))
-            
-        # Test rate limiting
-        print("\nTesting rate limiting...")
-        print("Making two quick requests to test rate limiting...")
-        results1 = await client.search("Python programming", count=3)
-        results2 = await client.search("Machine learning", count=3)
-        print(f"Successfully got {len(results1)} and {len(results2)} results")
-        
-        # Test error handling
-        print("\nTesting error handling with invalid API key...")
-        try:
-            invalid_client = BraveSearchClient(api_key="invalid_key")
-            await invalid_client.search("test")
-        except Exception as e:
-            print(f"Successfully caught error: {str(e)}")
-            
-    # Run the tests
+    # Run the test
     asyncio.run(test_search())
