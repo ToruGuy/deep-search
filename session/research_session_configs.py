@@ -8,12 +8,6 @@ class QueryConfig:
     query: str
     goals: List[str]
 
-@dataclass
-class WebExplorationResult:
-    """Results from web exploration for a specific query"""
-    serp_results: List[Dict]
-    web_extract_results: str
-    success_rating: float
 
 @dataclass 
 class SearchGrading:
@@ -52,14 +46,6 @@ class StepLearnings:
             "confidence_score": self.confidence_score,
             "suggested_queries": self.suggested_queries
         }
-
-@dataclass
-class ReaserchJobData:
-    """A single research job within a step"""
-    query_config: QueryConfig
-    exploration_results: WebExplorationResult
-    learnings: Dict[str, Any]
-    search_gradings: SearchGrading
 
 @dataclass
 class StepData:

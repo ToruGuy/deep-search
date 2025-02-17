@@ -6,7 +6,9 @@ class ResearchSettings:
     max_depth: int = 3
     search_timeout: int = 300  # in seconds
     max_results: int = 50
-    include_academic_sources: bool = True
+    include_web_content: bool = True
+    include_news: bool = True
+    include_discussions: bool = True
     language: str = "en"
     openai_api_key: Optional[str] = None
     
@@ -16,7 +18,7 @@ class ResearchSettings:
             "max_depth": self.max_depth,
             "search_timeout": self.search_timeout,
             "max_results": self.max_results,
-            "include_academic_sources": self.include_academic_sources,
+            "include_web_content": self.include_web_content,
             "language": self.language,
             "openai_api_key": self.openai_api_key
         }
