@@ -149,14 +149,24 @@ class BraveSearchResponse:
 class BraveSearchClient:
     """Client for interacting with Brave Search API"""
     
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv('BRAVE_API_KEY')
-        if not self.api_key:
-            logger.error("API key not provided and not found in environment variables")
-            raise ValueError("API key must be provided or set in BRAVE_API_KEY environment variable")
-        logger.debug("BraveSearchClient initialized successfully")
+    def __init__(self, api_key: str):
+        """Initialize BraveSearchClient with required API key.
         
-        self.base_url = 'https://api.search.brave.com/res/v1/web/search'
+        Args:
+            api_key (str): Brave Search API key
+            
+        Raises:
+            ValueError: If api_key is not provided
+        """
+        if not api_key:
+            raise ValueError("Brave Search API key must be provided")
+            
+        self.api_key = api_key
+        self.base_url = "https://api.search.brave.com/res/v1/web/search"
+        self.headers = {
+            "Accept": "application/json",
+            "X-Subscription-Token": self.api_key
+        }
         self.last_request_time = 0
         self.min_request_interval = 1.1  # 1.1 seconds to be safe
         
@@ -198,18 +208,12 @@ class BraveSearchClient:
         try:
             await self._wait_for_rate_limit()
             
-            headers = {
-                'Accept': 'application/json',
-                'Accept-Encoding': 'gzip',
-                'X-Subscription-Token': self.api_key
-            }
-            
             params = options.to_api_params()
             
             logger.debug(f"Making API request to Brave Search with params: {params}")
             response = requests.get(
                 self.base_url,
-                headers=headers,
+                headers=self.headers,
                 params=params
             )
             response.raise_for_status()
@@ -258,7 +262,12 @@ async def test_search():
     # Load environment variables
     load_dotenv()
     
-    client = BraveSearchClient()
+    api_key = os.getenv('BRAVE_API_KEY')
+    if not api_key:
+        logger.error("API key not found in environment variables")
+        raise ValueError("API key must be provided or set in BRAVE_API_KEY environment variable")
+    
+    client = BraveSearchClient(api_key)
     
     # Test basic web search
     print("\nBASIC WEB SEARCH")

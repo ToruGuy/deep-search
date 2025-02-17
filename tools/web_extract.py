@@ -26,11 +26,19 @@ class WebExtractionResult(BaseModel):
 class WebExtractor:
     """Handles web content extraction using Firecrawl"""
     
-    def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv('FIRECRAWL_API_KEY')
-        if not self.api_key:
-            raise ValueError("API key must be provided or set in FIRECRAWL_API_KEY environment variable")
+    def __init__(self, api_key: str):
+        """Initialize WebExtractor with required API key.
+        
+        Args:
+            api_key (str): Firecrawl API key for content extraction
             
+        Raises:
+            ValueError: If api_key is not provided
+        """
+        if not api_key:
+            raise ValueError("Firecrawl API key must be provided")
+            
+        self.api_key = api_key
         self.app = FirecrawlApp(api_key=self.api_key)
         logger.debug("WebExtractor initialized successfully")
         
@@ -117,7 +125,7 @@ if __name__ == "__main__":
     load_dotenv()
     
     # Create extractor
-    extractor = WebExtractor()
+    extractor = WebExtractor(api_key=os.getenv('FIRECRAWL_API_KEY'))
     
     # Test URLs and goals
     test_urls = [
