@@ -55,7 +55,7 @@ class SearchOptions:
     goggles: Optional[str] = None
     units: Optional[Units] = None
     extra_snippets: bool = True
-    summary: bool = True
+    summary: bool = False
 
     def to_api_params(self) -> Dict[str, Any]:
         """Convert options to API parameters"""
@@ -97,6 +97,20 @@ class BraveSearchResult:
     source_type: Optional[str] = None
     summary: Optional[str] = None
     meta: Optional[Dict[str, Any]] = None  # Store additional type-specific data
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert result to dictionary format"""
+        return {
+            "title": self.title,
+            "url": self.url,
+            "description": self.description,
+            "result_type": self.result_type.value,
+            "page_age": self.page_age,
+            "extra_snippets": self.extra_snippets,
+            "source_type": self.source_type,
+            "summary": self.summary,
+            "meta": self.meta
+        }
 
 class BraveSearchResponse:
     """Represents the complete search response"""
@@ -272,7 +286,7 @@ async def test_search():
         count=3,
         freshness=Freshness.PAST_MONTH,
         result_filter=[ResultType.NEWS],
-        safesearch=SafeSearch.MODERATE,
+        safesearch=SafeSearch.OFF,
         units=Units.METRIC,
         extra_snippets=True,
         summary=True
