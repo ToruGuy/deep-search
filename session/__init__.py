@@ -2,24 +2,18 @@
 Session package for managing research sessions and steps.
 """
 
+from .job import Job, JobState, QueryConfig, JobData
+from .step import Step, StepState
 from .research_session_configs import (
-    QueryConfig, 
-    WebExplorationResult, 
-    SearchGrading, 
-    ReaserchJobData,
-    StepData,
-    StepLearnings,
-    ResearchSession,
     ResearchResults
 )
 
 __all__ = [
+    'Job',
+    'JobState',
     'QueryConfig',
-    'WebExplorationResult',
-    'SearchGrading',
-    'ReaserchJobData',
-    'StepData',
-    'StepLearnings',
-    'ResearchSession',
+    'JobData',
+    'Step',
+    'StepState',
     'ResearchResults'
 ]
