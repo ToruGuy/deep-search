@@ -12,6 +12,7 @@ class BraveSearchResult:
     title: str
     url: str
     description: str
+    page_age: Optional[str] = None
 
 class BraveSearchClient:
     """Client for interacting with Brave Search API"""
@@ -89,7 +90,8 @@ class BraveSearchClient:
                 BraveSearchResult(
                     title=result['title'],
                     url=result['url'],
-                    description=result['description']
+                    description=result['description'],
+                    page_age=result.get('page_age')
                 )
                 for result in data['web']['results']
             ]
