@@ -29,12 +29,31 @@ class JobState(Enum):
 
 @dataclass
 class QueryConfig:
-    """Configuration for a research query"""
+    """Configuration for a research query.
+    
+    Attributes:
+        query (str): The main research query
+        goals (List[str]): List of research goals to achieve
+        context (Optional[str]): Additional context for the query
+        max_depth (int): Maximum depth for recursive research
+        max_results_per_goal (int): Maximum number of results to fetch per goal
+    """
     query: str
     goals: List[str]
     context: Optional[str] = None
     max_depth: int = 2
     max_results_per_goal: int = 5
+    
+    def __post_init__(self):
+        """Validate the query configuration"""
+        if not self.query:
+            raise ValueError("Query cannot be empty")
+        if not self.goals:
+            raise ValueError("At least one research goal is required")
+        if self.max_depth < 1:
+            raise ValueError("Max depth must be at least 1")
+        if self.max_results_per_goal < 1:
+            raise ValueError("Max results per goal must be at least 1")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert QueryConfig to dictionary format"""
@@ -79,6 +98,7 @@ class JobData:
             "error_message": self.error_message
         }
 
+
 class Job:
     def __init__(
         self, 
@@ -87,6 +107,20 @@ class Job:
         search_client: Optional[BraveSearchClient] = None,
         web_extractor: Optional[WebExtractor] = None
     ):
+        """Initialize a research job.
+        
+        Args:
+            query_config (QueryConfig): Configuration for the research query
+            settings (ResearchSettings): Research settings for the job
+            search_client (Optional[BraveSearchClient]): Pre-configured search client
+            web_extractor (Optional[WebExtractor]): Pre-configured web extractor
+        
+        Raises:
+            ValueError: If query_config is invalid
+        """
+        if not isinstance(query_config, QueryConfig):
+            raise ValueError("query_config must be an instance of QueryConfig")
+            
         self._query_config = query_config
         self._settings = settings
         self._search_client = search_client
@@ -119,50 +153,31 @@ class Job:
         if self.job_data:
             self.job_data.error_message = value
 
-    def _create_search_options(self) -> SearchOptions:
-        """Create search options from research settings and query config"""
-        result_types = []
-        if self._settings.include_web_content:
-            result_types.append(ResultType.WEB)
-        if self._settings.include_news:
-            result_types.append(ResultType.NEWS)
-        if self._settings.include_discussions:
-            result_types.append(ResultType.DISCUSSIONS)
-        
-        return SearchOptions(
-            query=self.query_config.query,
-            count=self._settings.max_results,
-            freshness=Freshness.PAST_YEAR,  # Default to past year
-            result_filter=result_types if result_types else None,
-            safesearch=SafeSearch.MODERATE,
-            extra_snippets=True,  # Always get extra context
-            summary=False,
-            search_lang=self._settings.language
-        )
-
     def initialize(self) -> bool:
-        """Initialize the job"""
+        """Initialize the job.
+        
+        Returns:
+            bool: True if initialization was successful, False otherwise
+            
+        Raises:
+            ValueError: If required dependencies are not provided
+        """
         try:
             # Create job data with provided query config
             self.job_data = JobData(query_config=self._query_config)
             
             logger.info(f"Initializing job {self.job_id} with query: {self.query_config.query}")
 
-            if not self.query_config or not self.query_config.query:
-                self.error_message = "Invalid query configuration: missing query"
-                self.state = JobState.FAILED
-                logger.error(f"Job {self.job_id} initialization failed: {self.error_message}")
-                return False
-
-            # Initialize search client and web extractor if not provided
+            # Validate search client and web extractor
             if self._search_client is None:
-                self._search_client = BraveSearchClient()
+                raise ValueError("BraveSearchClient must be provided")
             if self._web_extractor is None:
-                self._web_extractor = WebExtractor()
+                raise ValueError("WebExtractor must be provided")
             
             self.state = JobState.INITIALIZED
             logger.debug(f"Job {self.job_id} initialized successfully")
             return True
+            
         except Exception as e:
             self.error_message = str(e)
             self.state = JobState.FAILED
@@ -252,6 +267,27 @@ class Job:
             "settings": self._settings.to_dict()
         }
 
+    def _create_search_options(self) -> SearchOptions:
+        """Create search options from research settings and query config"""
+        result_types = []
+        if self._settings.include_web_content:
+            result_types.append(ResultType.WEB)
+        if self._settings.include_news:
+            result_types.append(ResultType.NEWS)
+        if self._settings.include_discussions:
+            result_types.append(ResultType.DISCUSSIONS)
+        
+        return SearchOptions(
+            query=self.query_config.query,
+            count=self._settings.max_results,
+            freshness=Freshness.PAST_YEAR,  # Default to past year
+            result_filter=result_types if result_types else None,
+            safesearch=SafeSearch.MODERATE,
+            extra_snippets=True,  # Always get extra context
+            summary=False,
+            search_lang=self._settings.language
+        )
+
 
 def print_job_results(job: Job):
     """Print the results of a successful job."""
@@ -289,44 +325,58 @@ def print_job_results(job: Job):
 
 
 async def test_job():
-    # Load environment variables
-    load_dotenv()
-    
-    # Create test settings
-    settings = ResearchSettings(
-        max_results=3,
-        language="en",
-        include_web_content=True,
-        include_news=True,
-        include_discussions=True,
-        max_depth=2,
-        search_timeout=30
-    )
-    
-    # Create query config
-    query_config = QueryConfig(
-        query="Latest developments in quantum computing 2024",
-        goals=[
-            "What are the most recent breakthroughs in quantum computing?",
-            "What are the practical applications being developed?"
-        ]
-    )
-    
-    # Create and run job
-    job = Job(query_config=query_config, settings=settings)
-    
-    print("Initializing job...")
-    if not job.initialize():
-        print(f"Failed to initialize job: {job.error_message}")
-        return
+    """Test job functionality with a sample query"""
+    try:
+        # Load environment variables for API keys
+        load_dotenv()
         
-    print("Running job...")
-    if not await job.run():
-        print(f"Failed to run job: {job.error_message}")
-        return
+        # Create test settings
+        settings = ResearchSettings(
+            max_results=3,
+            language="en",
+            include_web_content=True,
+            include_news=True,
+            include_discussions=True,
+            max_depth=2,
+            search_timeout=30
+        )
         
-    print_job_results(job)
-
+        # Initialize required dependencies
+        search_client = BraveSearchClient()
+        web_extractor = WebExtractor()
+        
+        # Create a test query config
+        query_config = QueryConfig(
+            query="What are the latest developments in quantum computing?",
+            goals=[
+                "Identify recent breakthroughs in quantum computing",
+                "List major companies working on quantum computers",
+                "Describe challenges in quantum computing development"
+            ]
+        )
+        
+        # Create and initialize job with dependencies
+        job = Job(
+            query_config=query_config,
+            settings=settings,
+            search_client=search_client,
+            web_extractor=web_extractor
+        )
+        
+        if not job.initialize():
+            print(f"Job initialization failed: {job.error_message}")
+            return
+            
+        print("\nRunning job...")
+        if not await job.run():
+            print(f"Job execution failed: {job.error_message}")
+            return
+            
+        print("\nJob completed successfully!")
+        print_job_results(job)
+        
+    except Exception as e:
+        print(f"Test failed with error: {str(e)}")
 
 if __name__ == "__main__":
     import asyncio
