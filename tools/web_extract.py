@@ -62,7 +62,7 @@ class WebExtractor:
         1. ONLY include factual information that is explicitly stated in the sources
         2. Use precise numbers, dates, and statistics when available
         3. Keep answers concise but complete - include all relevant facts
-        4. If information for a goal is not found, state "No factual information found"
+        4. If information for a goal is not found, state "NA"
         5. Do not include opinions, interpretations, or speculative content
         """
         
