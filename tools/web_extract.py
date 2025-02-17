@@ -2,55 +2,63 @@ from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field, create_model
 from firecrawl import FirecrawlApp
+from datetime import datetime
 import os
 import sys
-from datetime import datetime
+import requests
 from dotenv import load_dotenv
 from loguru import logger
 
-def create_extraction_schema(research_goals: List[str]):
-    """Create a dynamic schema based on research goals"""
-    logger.debug(f"Creating extraction schema for {len(research_goals)} goals")
-    fields = {}
-    
-    # Add a field for each research goal
-    for i, goal in enumerate(research_goals, 1):
-        fields[f"goal{i}"] = (str, Field(description=goal))
-        logger.trace(f"Added field goal{i} with description: {goal}")
-    
-    # Create and return the dynamic model
-    schema = create_model("DynamicExtractionSchema", **fields)
-    logger.debug("Extraction schema created successfully")
-    return schema
+class ExtractionResult(BaseModel):
+    """Core factual answers to research goals"""
+    goal1: str = Field(description="Answer to the first research goal")
+    goal2: Optional[str] = Field(None, description="Answer to the second research goal")
+    goal3: Optional[str] = Field(None, description="Answer to the third research goal")
+    goal4: Optional[str] = Field(None, description="Answer to the fourth research goal")
+    goal5: Optional[str] = Field(None, description="Answer to the fifth research goal")
 
-@dataclass
+class WebExtractionResult(BaseModel):
+    """Final consolidated extraction results"""
+    timestamp: datetime = Field(default_factory=datetime.now)
+    answers: Dict[str, str]
+    sources: List[str] 
+
 class WebExtractor:
     """Handles web content extraction using Firecrawl"""
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or os.getenv('FIRECRAWL_API_KEY')
         if not self.api_key:
-            logger.error("API key not provided and not found in environment variables")
             raise ValueError("API key must be provided or set in FIRECRAWL_API_KEY environment variable")
             
-        logger.debug("Initializing FirecrawlApp")
         self.app = FirecrawlApp(api_key=self.api_key)
         logger.debug("WebExtractor initialized successfully")
         
-    async def extract_content(self, urls: List[str], research_goals: List[str]) -> Dict[str, Any]:
-        """
-        Extract factual content from URLs based on research goals
+    def _create_schema(self, research_goals: List[str]) -> Dict[str, Any]:
+        """Create a schema based on research goals"""
+        properties = {}
+        required = ["goal1"]  # First goal is always required
         
-        Args:
-            urls: List of URLs to extract content from
-            research_goals: List of research goals to get answers for
-            
-        Returns:
-            Dictionary containing answers for each goal
-        """
+        for i, goal in enumerate(research_goals, 1):
+            field_name = f"goal{i}"
+            properties[field_name] = {
+                "type": "string",
+                "description": goal
+            }
+            if i > 1:  # Make all goals after the first optional
+                properties[field_name]["default"] = "NA"
+        
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required
+        }
+        
+    async def extract_content(self, urls: List[str], research_goals: List[str]) -> WebExtractionResult:
+        """Extract factual content from URLs based on research goals"""
         logger.info(f"Starting content extraction for {len(urls)} URLs")
         
-        # Create prompt emphasizing factual, concise responses
+        # Format research goals
         goals_formatted = "\n".join(f"- {goal}" for goal in research_goals)
         prompt = f"""
         IMPORTANT: Provide ONLY factual, data-oriented information from these pages. Focus on core facts and verified data.
@@ -67,37 +75,38 @@ class WebExtractor:
         """
         
         try:
-            # Create dynamic schema based on goals
-            ExtractionSchema = create_extraction_schema(research_goals)
-            logger.debug("Created extraction schema")
-            
-            # Extract content using Firecrawl
-            logger.debug("Starting content extraction")
+            # Extract content using Firecrawl with manually created schema
             response = self.app.extract(
                 urls=urls,
                 params={
                     "prompt": prompt,
-                    "schema": ExtractionSchema.model_json_schema(),
+                    "schema": self._create_schema(research_goals),
                 },
             )
             
-            if response.get("success"):
-                logger.info(f"Successfully extracted content from {len(urls)} URLs")
-                return response["data"]
-            else:
-                logger.error(f"Extraction failed: {response.get('error', 'Unknown error')}")
-                raise Exception(f"Extraction failed: {response.get('error', 'Unknown error')}")
+            if not response.get("success"):
+                raise ValueError(f"Extraction failed: {response.get('error', 'Unknown error')}")
                 
-        except Exception as e:
-            logger.error(f"Error during content extraction: {str(e)}")
-            raise Exception(f"Error during content extraction: {str(e)}")
+            # Convert response data to answers dictionary
+            answers = {
+                f"goal{i+1}": response["data"].get(f"goal{i+1}", "NA")
+                for i in range(len(research_goals))
+            }
             
-    def _validate_urls(self, urls: List[str]) -> bool:
-        """Validate URLs format"""
-        if not urls or not isinstance(urls, list):
-            return False
-        return all(isinstance(url, str) and url.startswith(('http://', 'https://')) for url in urls)
-
+            return WebExtractionResult(
+                answers=answers,
+                sources=urls
+            )
+                
+        except requests.HTTPError as e:
+            logger.error(f"API error: {e.status_code} - {e.response.text}")
+            raise ValueError("Service unavailable") from e
+        except (TimeoutError, ConnectionError) as e:
+            logger.warning(f"Network issue: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error during extraction: {str(e)}")
+            raise ValueError("Failed to extract content") from e
 
 if __name__ == "__main__":
     # Configure logger
@@ -127,9 +136,11 @@ if __name__ == "__main__":
         results = asyncio.run(extractor.extract_content(test_urls, test_goals))
         
         print("\nExtraction Results:")
+        print(f"Source URLs: {results.sources}")
+        print(f"Extraction Timestamp: {results.timestamp}")
         for i, goal in enumerate(test_goals, 1):
             print(f"\nGoal: {goal}")
-            print(f"Answer: {results[f'goal{i}']}")
+            print(f"Answer: {results.answers.get(f'goal{i}', 'NA')}")
         
     except Exception as e:
         print(f"Error during test: {str(e)}")
