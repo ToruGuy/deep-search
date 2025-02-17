@@ -68,15 +68,15 @@ For each research topic, you will generate:
    - Specify relationships between entities and technical details
    - Focus on key trends, comparisons, and practical implementations"""
     
-    def create_queries(self, main_goal: str, previous_learnings: List[str] = None) -> List[QueryConfig]:
+    def create_queries(self, main_goal: str, learnings: List[str] = None) -> List[QueryConfig]:
         """Create a set of research queries based on the main goal and previous learnings.
         Returns a list of QueryConfig objects, each containing:
         - query: SERP-optimized search query for browser search
         - goals: Detailed extraction goals for AI to process the search results (max 4)
         """
-        previous_learnings = previous_learnings or []
+        learnings = learnings or []
         logger.debug("Creating queries for goal: '{}' with {} previous learnings", 
-                    main_goal, len(previous_learnings))
+                    main_goal, len(learnings))
         
         try:
             completion = self.client.beta.chat.completions.parse(
@@ -84,7 +84,7 @@ For each research topic, you will generate:
                 messages=[
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": f"""Based on the main research goal: '{main_goal}'
-Previous learnings: {previous_learnings if previous_learnings else 'None'}
+Previous learnings: {learnings if learnings else 'None'}
 Generate {self.breath} research queries with their corresponding extraction goals.
 Each query should explore a different aspect of the main goal.
 Important: Provide exactly 4 or fewer specific goals for each query."""}

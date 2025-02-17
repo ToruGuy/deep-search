@@ -8,6 +8,7 @@ class ResearchSettings:
     max_results: int = 50
     include_academic_sources: bool = True
     language: str = "en"
+    openai_api_key: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert settings to a dictionary."""
@@ -16,7 +17,8 @@ class ResearchSettings:
             "search_timeout": self.search_timeout,
             "max_results": self.max_results,
             "include_academic_sources": self.include_academic_sources,
-            "language": self.language
+            "language": self.language,
+            "openai_api_key": self.openai_api_key
         }
     
 @dataclass

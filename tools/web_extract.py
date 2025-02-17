@@ -37,7 +37,7 @@ class WebExtractor:
         self.app = FirecrawlApp(api_key=self.api_key)
         logger.debug("WebExtractor initialized successfully")
         
-    def extract_content(self, urls: List[str], research_goals: List[str]) -> Dict[str, Any]:
+    async def extract_content(self, urls: List[str], research_goals: List[str]) -> Dict[str, Any]:
         """
         Extract factual content from URLs based on research goals
         
@@ -123,7 +123,8 @@ if __name__ == "__main__":
     
     print("Testing content extraction...")
     try:
-        results = extractor.extract_content(test_urls, test_goals)
+        import asyncio
+        results = asyncio.run(extractor.extract_content(test_urls, test_goals))
         
         print("\nExtraction Results:")
         for i, goal in enumerate(test_goals, 1):

@@ -4,6 +4,7 @@ from enum import Enum
 import os
 import sys
 from datetime import datetime
+import asyncio
 from loguru import logger
 
 # Add the root directory to Python path
@@ -47,17 +48,34 @@ class ResearchStep:
     """A research step that manages multiple jobs and aggregates their results"""
     
     step_number: int
+    query_configs: List[QueryConfig] = field(default_factory=list)
     state: ResearchStepState = ResearchStepState.NONE
     jobs: Dict[str, Job] = field(default_factory=dict)  # Map of job_id to Job
     step_data: Optional[StepData] = None
     error_message: Optional[str] = None
     
+    def __post_init__(self):
+        """Initialize jobs from query configs"""
+        # First initialize the step
+        if not self.initialize():
+            self.state = ResearchStepState.FAILED
+            return
+            
+        # Then add jobs if we have query configs
+        if self.query_configs:
+            for config in self.query_configs:
+                job_id = self.add_job(config)
+                if not job_id:
+                    self.state = ResearchStepState.FAILED
+                    return
+        
+        self.state = ResearchStepState.INITIALIZED
+
     def initialize(self) -> bool:
         """Initialize the research step"""
         logger.info(f"Initializing research step {self.step_number}")
         try:
             self.step_data = StepData(step_number=self.step_number)
-            self.state = ResearchStepState.INITIALIZED
             logger.debug("Research step initialized successfully")
             return True
         except Exception as e:
@@ -195,15 +213,6 @@ if __name__ == "__main__":
         load_dotenv()
         
         # Create a test research step
-        step = ResearchStep(step_number=1)
-        
-        # Initialize step
-        print("Initializing research step...")
-        if not step.initialize():
-            print(f"Step initialization failed: {step.error_message}")
-            return False
-        
-        # Add test jobs
         test_queries = [
             ("What are the latest AI breakthroughs?", [
                 "What are the most significant AI developments in the past year?",
@@ -217,19 +226,14 @@ if __name__ == "__main__":
             ])
         ]
         
-        job_ids = []  # Keep track of job IDs
+        query_configs = []
         for query, goals in test_queries:
-            query_config = QueryConfig(query=query, goals=goals)
-            job_id = step.add_job(query_config)
-            if job_id:
-                job_ids.append(job_id)
-                print(f"Added job {job_id} with query: {query}")
-            else:
-                print(f"Failed to add job: {step.error_message}")
-                return False
+            query_configs.append(QueryConfig(query=query, goals=goals))
+        
+        step = ResearchStep(step_number=1, query_configs=query_configs)
         
         # Run the step
-        print(f"\nRunning research step with {len(job_ids)} jobs...")
+        print(f"\nRunning research step with {len(step.jobs)} jobs...")
         if not await step.run():
             print(f"Step execution failed: {step.error_message}")
             return False

@@ -99,7 +99,7 @@ class Job:
             
             # Extract content using Firecrawl
             logger.debug(f"Starting web extraction for job {self.job_id}")
-            extraction_results = self._web_extractor.extract_content(
+            extraction_results = await self._web_extractor.extract_content(
                 urls=urls,
                 research_goals=self.query_config.goals
             )
