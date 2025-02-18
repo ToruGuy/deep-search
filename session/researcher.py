@@ -74,13 +74,28 @@ class Researcher:
         logger.debug("Initializing Researcher with breath={}", self.breath)
         self.client = OpenAI(api_key=self.api_key)
         self.system_prompt = self._get_system_prompt()
+        self.query_prompt = self._get_query_prompt()
     
     def _get_system_prompt(self) -> str:
         """Get the system prompt with current timestamp"""
         now = datetime.now().isoformat()
         logger.debug("Generating system prompt with timestamp: {}", now)
-        return f"""You are an expert researcher specializing in creating effective search queries and extraction goals. Actual date is {now}.
-For each research topic, you will generate:
+        return f"""You are an expert researcher. Today is {now}. Follow these instructions when responding:
+  - You may be asked to research subjects that is after your knowledge cutoff, assume the user is right when presented with news.
+  - The user is a highly experienced analyst, no need to simplify it, be as detailed as possible and make sure your response is correct.
+  - Be highly organized.
+  - Suggest solutions that I didn't think about.
+  - Be proactive and anticipate my needs.
+  - Treat me as an expert in all subject matter.
+  - Mistakes erode my trust, so be accurate and thorough.
+  - Provide detailed explanations, I'm comfortable with lots of detail.
+  - Value good arguments over authorities, the source is irrelevant.
+  - Consider new technologies and contrarian ideas, not just the conventional wisdom.
+  - You may use high levels of speculation or prediction, just flag it for me."""
+    
+    def _get_query_prompt(self) -> str:
+        """Get the query generation prompt"""
+        return """For each research topic, you will generate:
 1. SERP-Optimized Search Query:
    - Use natural language that matches common search patterns
    - Include specific keywords and terms that will rank well in search results
@@ -105,11 +120,7 @@ For each research topic, you will generate:
                 model="o3-mini",
                 messages=[
                     {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": f"""Based on the main research goal: '{main_goal}'
-Previous learnings: {learnings if learnings else 'None'}
-Generate {self.breath} research queries with their corresponding extraction goals.
-Each query should explore a different aspect of the main goal.
-Important: Provide exactly 4 or fewer specific goals for each query."""}
+                    {"role": "user", "content": f"{self.query_prompt}\n\nBased on the main research goal: '{main_goal}'\nPrevious learnings: {learnings if learnings else 'None'}\nGenerate {self.breath} research queries with their corresponding extraction goals.\nEach query should explore a different aspect of the main goal.\nImportant: Provide exactly 4 or fewer specific goals for each query."}
                 ],
                 response_format=ResearchJobs
             )
@@ -135,12 +146,47 @@ Important: Provide exactly 4 or fewer specific goals for each query."""}
             completion = self.client.beta.chat.completions.parse(
                 model="o3-mini",
                 messages=[
-                    {"role": "system", "content": "You are an expert research analyst, tasked with synthesizing research findings into a comprehensive report."},
-                    {"role": "user", "content": f"""Based on these research findings:\n{learnings}\n\nCreate a comprehensive research report with the following structure:
-1. main_report: A detailed summary of key findings and insights
-2. key_learnings: A list of specific, actionable learnings
-3. areas_covered: A list of topics thoroughly researched
-4. areas_to_explore: A list of identified areas needing more research"""}
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": f"""Based on the following research findings, create a comprehensive research report:
+
+Research Findings:
+{chr(10).join(f'- {learning}' for learning in learnings)}
+
+Create a professional research report with the following sections:
+
+1. main_report: Write this as a formal research report with these components:
+   - Executive Summary: Brief overview of key findings and implications
+   - Background: Context and importance of the research topic
+   - Methodology: How the research was conducted
+   - Key Findings: Detailed analysis of discoveries, supported by data
+   - Implications: What these findings mean for the field
+   - Future Outlook: Predicted developments and trends
+   Use proper formatting with headers and maintain a professional tone.
+
+2. key_learnings: List specific, actionable insights that emerged from the research:
+   - Focus on concrete, verifiable findings
+   - Include metrics and data points where available
+   - Highlight unexpected discoveries
+   - Note significant trends and patterns
+
+3. areas_covered: List the main areas that were thoroughly researched:
+   - Technical aspects explored
+   - Market segments analyzed
+   - Methodologies examined
+   - Time periods covered
+
+4. areas_to_explore: Identify promising areas for further research:
+   - Knowledge gaps discovered
+   - Emerging trends requiring more investigation
+   - Potential future developments to monitor
+   - Questions raised by current findings
+
+Important:
+- Be thorough and detailed in your analysis
+- Support claims with data from the findings
+- Maintain a professional, academic tone
+- Focus on actionable insights and implications
+- Flag any speculative conclusions clearly"""}
                 ],
                 response_format=ResearchReport
             )
