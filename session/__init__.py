@@ -4,9 +4,8 @@ Session package for managing research sessions and steps.
 
 from .job import Job, JobState, QueryConfig, JobData
 from .step import Step, StepState
-from .research_session_configs import (
-    ResearchResults
-)
+from .researcher import ResearchResults
+from .session import SessionData
 
 __all__ = [
     'Job',
@@ -15,5 +14,6 @@ __all__ = [
     'JobData',
     'Step',
     'StepState',
-    'ResearchResults'
+    'ResearchResults',
+    'SessionData'
 ]
