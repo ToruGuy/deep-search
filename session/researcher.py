@@ -1,10 +1,10 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 import sys
 from datetime import datetime
 from openai import OpenAI
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
 from loguru import logger
 
 # Configure loguru
@@ -17,16 +17,42 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-from session.job import Job
-from session.research_session_configs import QueryConfig
+from session.job import Job, QueryConfig
+
+@dataclass
+class ResearchResults:
+    """Final results of the research session"""
+    main_report: str
+    key_learnings: List[str]
+    # visited_sources: List[Dict[str, Any]]  # List of sources with metadata like quality, relevance
+    areas_covered: List[str]  # Areas that were thoroughly researched
+    areas_to_explore: List[str]  # Areas identified for further research
+    # best_sources: List[Dict[str, Any]]  # Top sources with high quality scores
+    additional_notes: Optional[str] = None
+
+class ResearchReport(BaseModel):
+    """Schema for research report validation"""
+    main_report: str
+    key_learnings: List[str]
+    areas_covered: List[str]
+    areas_to_explore: List[str]
+    
+    @field_validator('key_learnings', 'areas_covered', 'areas_to_explore')
+    @classmethod
+    def validate_list_length(cls, v: List[str]) -> List[str]:
+        """Ensure lists are not empty"""
+        if not v:
+            return []
+        return v
 
 class ResearchJob(BaseModel):
     """Single research job configuration"""
     query: str
     goals: List[str]
-
-    @validator('goals')
-    def validate_goals_length(cls, v):
+    
+    @field_validator('goals')
+    @classmethod
+    def validate_goals_length(cls, v: List[str]) -> List[str]:
         """Ensure goals list doesn't exceed 4 items"""
         if len(v) > 4:
             logger.warning(f"Truncating goals list from {len(v)} to 4 items")
@@ -62,18 +88,14 @@ For each research topic, you will generate:
    - Focus on getting high-quality, relevant search results
    - Avoid complex operators or special characters
 
-2. Research Goals for AI Extraction (maximum 4 goals):
+2. Research Goals for AI Extraction (2-4 goals):
    - Provide detailed, specific data points to extract
    - Include numerical metrics, dates, and measurable outcomes
    - Specify relationships between entities and technical details
    - Focus on key trends, comparisons, and practical implementations"""
     
     def create_queries(self, main_goal: str, learnings: List[str] = None) -> List[QueryConfig]:
-        """Create a set of research queries based on the main goal and previous learnings.
-        Returns a list of QueryConfig objects, each containing:
-        - query: SERP-optimized search query for browser search
-        - goals: Detailed extraction goals for AI to process the search results (max 4)
-        """
+        """Create a set of research queries based on the main goal and previous learnings."""
         learnings = learnings or []
         logger.debug("Creating queries for goal: '{}' with {} previous learnings", 
                     main_goal, len(learnings))
@@ -99,49 +121,52 @@ Important: Provide exactly 4 or fewer specific goals for each query."""}
                 goals=job.goals
             ) for job in result.jobs]
         except Exception as e:
-            logger.error("Error generating queries: {}", str(e))
+            logger.error(f"Failed to create queries: {e}")
+            # Return a basic query config as fallback
             return [QueryConfig(
                 query=main_goal,
-                goals=[f"Error generating queries: {str(e)}"]
+                goals=["Extract key findings and results", "Identify main conclusions"]
             )]
     
-    def write_report(self, learnings: List[str]) -> str:
+    def write_report(self, learnings: List[str]) -> ResearchResults:
         """Generate a comprehensive report based on all gathered learnings"""
         logger.debug("Writing report based on {} learnings", len(learnings))
         try:
-            response = self.client.chat.completions.create(
+            completion = self.client.beta.chat.completions.parse(
                 model="o3-mini",
                 messages=[
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": f"Based on the following research findings, write a comprehensive report:\nFindings:\n{chr(10).join(f'- {learning}' for learning in learnings)}"}
-                ]
+                    {"role": "system", "content": "You are an expert research analyst, tasked with synthesizing research findings into a comprehensive report."},
+                    {"role": "user", "content": f"""Based on these research findings:\n{learnings}\n\nCreate a comprehensive research report with the following structure:
+1. main_report: A detailed summary of key findings and insights
+2. key_learnings: A list of specific, actionable learnings
+3. areas_covered: A list of topics thoroughly researched
+4. areas_to_explore: A list of identified areas needing more research"""}
+                ],
+                response_format=ResearchReport
             )
-            return response.choices[0].message.content
-        except Exception as e:
-            error_msg = f"Error generating report: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
-
-    def create_jobs(self, query: str) -> List[Job]:
-        """Create jobs based on the input query"""
-        # Implementation for creating jobs
-        return []
-    
-    def process_jobs(self, jobs: List[Job]):
-        """Process a list of jobs"""
-        for job in jobs:
-            job.process()
             
-    def analyze_results(self, jobs: List[Job]) -> dict:
-        """Analyze results from completed jobs"""
-        # Implementation for analyzing results
-        return {}
+            result = completion.choices[0].message.parsed
+            return ResearchResults(
+                main_report=result.main_report,
+                key_learnings=result.key_learnings,
+                areas_covered=result.areas_covered,
+                areas_to_explore=result.areas_to_explore,
+                additional_notes="Report generated from research findings"
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to write report: {e}")
+            return ResearchResults(
+                main_report="Failed to generate report",
+                key_learnings=learnings,
+                areas_covered=[],
+                areas_to_explore=[],
+                additional_notes=f"Error during report generation: {str(e)}"
+            )
 
 if __name__ == "__main__":
-    import os
-    from dotenv import load_dotenv
-    
     # Load environment variables
+    from dotenv import load_dotenv
     load_dotenv()
     
     # Get API key from environment
@@ -163,14 +188,29 @@ if __name__ == "__main__":
         print("   Goals:")
         for goal in config.goals:
             print(f"   - {goal}")
-    
+            
     # Test write_report
-    # print("\nTesting write_report:")
-    # test_learnings = [
-    #     "GPT-4 has shown remarkable improvements in reasoning capabilities",
-    #     "New breakthrough in quantum computing achieved 1000 qubit milestone",
-    #     "Advanced AI models now capable of generating and executing code"
-    # ]
-    # report = researcher.write_report(test_learnings)
-    # print("\nGenerated Report:")
-    # print(report)
+    print("\nTesting write_report:")
+    test_learnings = [
+        "GPT-4 has demonstrated unprecedented capabilities in coding, showing 90% success rate in complex programming tasks",
+        "New breakthrough: Google's Gemini Ultra achieved human-expert level performance across 57 subjects",
+        "Microsoft and OpenAI partnership led to significant cost reduction in AI model training, reported 40% efficiency gain",
+        "Anthropic's Claude 3 showed remarkable improvement in reasoning and safety, reducing hallucinations by 80%",
+        "Meta's LLAMA 3 open-source model matched proprietary models while using 50% less compute power"
+    ]
+    
+    report = researcher.write_report(test_learnings)
+    print("\nGenerated Research Report:")
+    print("\nMain Report:")
+    print(report.main_report)
+    print("\nKey Learnings:")
+    for learning in report.key_learnings:
+        print(f"- {learning}")
+    print("\nAreas Covered:")
+    for area in report.areas_covered:
+        print(f"- {area}")
+    print("\nAreas to Explore:")
+    for area in report.areas_to_explore:
+        print(f"- {area}")
+    print("\nAdditional Notes:")
+    print(report.additional_notes)
