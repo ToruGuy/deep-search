@@ -1,8 +1,12 @@
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Any
 from enum import Enum
 import os
 import sys
+import asyncio
+from datetime import datetime
+from dotenv import load_dotenv
+from loguru import logger
 
 # Add the root directory to Python path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -11,10 +15,19 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 from input_config import ResearchInput, ResearchSettings
-from session.research_session_configs import ResearchSession, ResearchResults, QueryConfig
-from session.researcher import Researcher
-from session.research_step import ResearchStep, ResearchStepState
-from loguru import logger
+from session.step import Step, StepData
+from session.researcher import Researcher, ResearchResults
+from tools.web_search import BraveSearchClient
+from tools.web_extract import WebExtractor
+
+@dataclass
+class SessionData:
+    """Main container for all research-related data produced during a research run"""
+    session_id: str
+    start_time: datetime = field(default_factory=datetime.now)
+    end_time: Optional[datetime] = None
+    steps: List[StepData] = field(default_factory=list)
+    final_results: Optional[ResearchResults] = None
 
 class SessionState(Enum):
     NONE = "none"
@@ -23,99 +36,142 @@ class SessionState(Enum):
     COMPLETED = "completed"
     ERROR = "error"
 
-@dataclass
 class Session:
-    research_input: ResearchInput
-    state: SessionState = SessionState.NONE
-    session_data: Optional[ResearchSession] = None
-    error_message: Optional[str] = None
+    """Main session controller that manages the research process"""
     
-    def initialize(self) -> bool:
-        """Initialize the research session"""
-        try:
-            if not self.research_input.validate():
-                self.state = SessionState.ERROR
-                self.error_message = "Invalid research input"
-                return False
-                
-            # Generate a unique session ID using timestamp
-            from datetime import datetime
-            session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            self.session_data = ResearchSession(session_id=session_id)
-            self.state = SessionState.INITIALIZED
-            return True
-        except Exception as e:
-            self.state = SessionState.ERROR
-            self.error_message = str(e)
-            return False
+    def __init__(self, research_input: ResearchInput):
+        """Initialize the research session with required components
+        
+        Args:
+            research_input: Configuration for the research session
             
-    async def research(self) -> bool:
-        """Start the research process"""
+        Raises:
+            ValueError: If required API keys are missing or research input is invalid
+        """
+        load_dotenv()
+        
+        if not research_input.validate():
+            raise ValueError("Invalid research input")
+            
+        self.research_input = research_input
+        self.state = SessionState.NONE
+        self.error_message: Optional[str] = None
+        
+        # Generate a unique session ID using timestamp
+        session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.session_data = SessionData(session_id=session_id)
+        
+        # Initialize clients
+        brave_api_key = os.getenv('BRAVE_API_KEY')
+        firecrawl_api_key = os.getenv('FIRECRAWL_API_KEY')
+        openai_api_key = os.getenv('OPENAI_API_KEY')
+        
+        if not brave_api_key:
+            raise ValueError("BRAVE_API_KEY must be set in environment")
+        if not firecrawl_api_key:
+            raise ValueError("FIRECRAWL_API_KEY must be set in environment")
+        if not openai_api_key:
+            raise ValueError("OPENAI_API_KEY must be set in environment")
+            
+        self.search_client = BraveSearchClient(api_key=brave_api_key)
+        self.web_extractor = WebExtractor(api_key=firecrawl_api_key)
+        self.researcher = Researcher(
+            api_key=openai_api_key,
+            breath=self.research_input.settings.max_depth
+        )
+        self.state = SessionState.INITIALIZED
+            
+    async def run(self) -> bool:
+        """Start the research process
+        
+        Returns:
+            bool: True if research completed successfully, False otherwise
+        """
         if self.state != SessionState.INITIALIZED:
             logger.error("Cannot start research - session not initialized")
             return False
             
         try:
             self.state = SessionState.RESEARCHING
-            researcher = Researcher(
-                api_key=self.research_input.settings.openai_api_key,
-                breath=self.research_input.settings.max_depth
-            )
             all_learnings = []
+            all_sources = []
             step_number = 1
             
             while step_number <= self.research_input.settings.max_depth:
                 logger.info(f"Starting research step {step_number}")
                 
-                # Initialize research step
-                research_step = ResearchStep(step_number=step_number)
-                if not research_step.initialize():
-                    raise Exception("Failed to initialize research step")
-                    
-                # Generate queries for this step
-                queries = researcher.create_queries(
+                # Generate queries for this step using researcher
+                queries = self.researcher.create_queries(
                     self.research_input.query_topic,
                     all_learnings
                 )
                 logger.info("Step {} queries: {}", step_number, queries)
                 
-                # Add queries as jobs to the research step
-                for query in queries:
-                    research_step.add_job(query)
-                    
+                # Initialize research step with clients and queries
+                step = Step(
+                    step_number=step_number,
+                    query_configs=queries,  # Pass the generated queries directly
+                    settings=self.research_input.settings,
+                    search_client=self.search_client,
+                    web_extractor=self.web_extractor
+                )
+                
                 # Run the research step
-                if not await research_step.run():
+                if not await step.run():
                     raise Exception("Research step failed")
                     
                 # Get results
-                step_data = research_step.get_results()
-                # logger.debug("Step {} data: {}", step_number, step_data)
+                step_data = step.get_results()
+                self.session_data.steps.append(step_data)
                 
-                # Add learnings to all_learnings if available
-                if step_data.step_learnings and step_data.step_learnings.key_findings:
-                    all_learnings.append(step_data.step_learnings)
-                    logger.info("Step {} learnings:", step_number)
-                    for finding in step_data.step_learnings.key_findings:
-                        logger.info("  {}", finding)
+                # Log step results
+                logger.info(f"\n{'='*50}\nStep {step_number} Results\n{'='*50}")
+                
+                # Log learnings
+                logger.info("\nLearnings from this step:")
+                if step_data.learnings:
+                    all_learnings.append(step_data.learnings)
+                    for learning in step_data.learnings.split('\n'):
+                        if learning.strip():
+                            logger.info(f"  • {learning.strip()}")
+                
+                # Log sources
+                logger.info("\nSources visited in this step:")
+                step_sources = []
+                for job_id, job_data in step_data.jobs_data.items():
+                    if job_data.search_results:
+                        for result in job_data.search_results:
+                            source = {
+                                "title": result.title,
+                                "url": result.url,
+                                "page_age": result.page_age,
+                                "description": result.description
+                            }
+                            step_sources.append(source)
+                            logger.info(f"\n  Source: {result.title}")
+                            logger.info(f"  URL: {result.url}")
+                            logger.info(f"  Age: {result.page_age or 'Unknown'}")
+                            logger.info(f"  Description: {result.description}")
+                
+                all_sources.extend(step_sources)
+                logger.info(f"\n{'='*50}\n")
                 
                 step_number += 1
-            
-            # Generate final report
+                
+            # Generate final research results using researcher
             logger.info("Generating final research report")
-            final_report = researcher.write_report([
-                learning.key_findings for learning in all_learnings
-            ])
-            logger.info("Final Report:\n{}", final_report)
+            self.session_data.final_results = self.researcher.write_report(all_learnings)
             
             self.state = SessionState.COMPLETED
+            self.session_data.end_time = datetime.now()
             return True
             
         except Exception as e:
             self.state = SessionState.ERROR
             self.error_message = str(e)
-            logger.error("Research failed: {}", str(e))
+            logger.error(f"Research failed: {e}")
             return False
-            
+
     def get_status(self) -> dict:
         """Get the current status of the research session"""
         return {
@@ -125,38 +181,76 @@ class Session:
         }
 
 if __name__ == "__main__":
-    from dotenv import load_dotenv
-    import os
-    from input_config import ResearchInput, ResearchSettings
+    # Configure logger
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
     
     # Load environment variables
     load_dotenv()
     
     # Create example research input with settings including OpenAI key
     research_input = ResearchInput(
-        query_topic="What are the key advancements in cybersecurity AI for threat detection in 2024, and how do they compare in terms of efficiency, false positive rates, and real-world adoption?",
+        query_topic="Game-Changing AI Developments in 2025: Emerging Trends, Key Innovations, and Industry Leaders Shaping the Future",
         settings=ResearchSettings(
             max_depth=4,
             search_timeout=300,
-            max_results=50,
-            include_academic_sources=True,
+            max_results=3,
+            include_web_content=True,
+            include_news=True,
+            include_discussions=True,
             language="en",
-            openai_api_key=os.getenv("OPENAI_API_KEY")
+            openai_api_key=os.getenv('OPENAI_API_KEY')
         )
     )
     
-    # Create and initialize session
+    # Create and run session
     session = Session(research_input=research_input)
     
     print("Initializing research session...")
-    if not session.initialize():
+    if session.state != SessionState.INITIALIZED:
         print(f"Session initialization failed: {session.error_message}")
         exit(1)
     
-    import asyncio
     print("\nStarting research process...")
-    if not asyncio.run(session.research()):
+    if not asyncio.run(session.run()):
         print(f"Research process failed: {session.error_message}")
         exit(1)
+        
+    # Print final summary
+    print(f"\n{'='*50}\nFinal Research Summary\n{'='*50}")
+    print("\nMain Report:")
+    print(session.session_data.final_results.main_report)
     
-    print("\nResearch completed successfully!")
+    print("\nKey Learnings:")
+    for learning in session.session_data.final_results.key_learnings:
+        print(f"  • {learning}")
+    
+    print("\nAreas Covered:")
+    for area in session.session_data.final_results.areas_covered:
+        print(f"  • {area}")
+    
+    print("\nAreas to Explore:")
+    for area in session.session_data.final_results.areas_to_explore:
+        print(f"  • {area}")
+    
+    print("\nAll Sources Used:")
+    all_sources = []
+    for step_data in session.session_data.steps:
+        for job_id, job_data in step_data.jobs_data.items():
+            if job_data.search_results:
+                for result in job_data.search_results:
+                    source = {
+                        "title": result.title,
+                        "url": result.url,
+                        "page_age": result.page_age,
+                        "description": result.description
+                    }
+                    all_sources.append(source)
+    
+    for i, source in enumerate(all_sources, 1):
+        print(f"\n{i}. {source['title']}")
+        print(f"   URL: {source['url']}")
+        print(f"   Age: {source['page_age'] or 'Unknown'}")
+        print(f"   Description: {source['description']}")
+    
+    print(f"\n{'='*50}\n")
