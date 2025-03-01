@@ -10,6 +10,10 @@ A powerful tool for conducting in-depth web research on specified topics. Deep S
 - AI-powered analysis and summarization using OpenAI
 - Customizable research parameters and settings
 
+## Architecture
+<img width="941" alt="image" src="https://github.com/user-attachments/assets/8ba419e6-094a-46d8-9b09-22cd2298d879" />
+<img width="425" alt="image" src="https://github.com/user-attachments/assets/55c75049-082c-494a-965e-51fb378dd297" />
+
 ## Installation
 
 ### Prerequisites
